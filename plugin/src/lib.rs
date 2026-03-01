@@ -1,5 +1,7 @@
 use nih_plug::prelude::*;
+use nih_plug_egui::{create_egui_editor, egui, EguiState, widgets};
 use std::sync::{Arc, Mutex};
+
 
 use df::tract::{DfParams, DfTract, RuntimeParams};
 use ndarray::Array2;
@@ -22,16 +24,34 @@ struct DeepFilterPlugin {
 
 #[derive(Params)]
 struct DeepFilterParams {
+    #[id = "input_trim"]
+    pub input_trim: FloatParam,
+
     #[id = "atten_lim"]
     pub atten_lim: FloatParam,
 
     #[id = "mix"]
     pub mix: FloatParam,
+
+    #[id = "output_gain"]
+    pub output_gain: FloatParam,
+
+    #[persist = "editor-state"]
+    pub editor_state: Arc<EguiState>,
 }
 
 impl Default for DeepFilterParams {
     fn default() -> Self {
         Self {
+            input_trim: FloatParam::new(
+
+                "Input Trim",
+                0.0,
+                FloatRange::Linear { min: -24.0, max: 24.0 },
+            )
+            .with_unit(" dB")
+            .with_smoother(SmoothingStyle::Linear(50.0)),
+
             atten_lim: FloatParam::new(
                 "Attenuation Limit",
                 100.0,
@@ -48,7 +68,18 @@ impl Default for DeepFilterParams {
             .with_unit(" %")
             .with_value_to_string(formatters::v2s_f32_percentage(0))
             .with_string_to_value(formatters::s2v_f32_percentage()),
+
+            output_gain: FloatParam::new(
+                "Output Gain",
+                0.0,
+                FloatRange::Linear { min: -24.0, max: 24.0 },
+            )
+            .with_unit(" dB")
+            .with_smoother(SmoothingStyle::Linear(50.0)),
+
+            editor_state: EguiState::from_size(400, 300),
         }
+
     }
 }
 
@@ -93,6 +124,41 @@ impl Plugin for DeepFilterPlugin {
     fn params(&self) -> Arc<dyn Params> {
         self.params.clone()
     }
+
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        let params = self.params.clone();
+        create_egui_editor(
+            self.params.editor_state.clone(),
+            (),
+            |_, _| {},
+            move |egui_ctx, setter, _state| {
+                let params = &params;
+                
+                egui::CentralPanel::default().show(egui_ctx, |ui| {
+                    ui.label("DeepFilterNet3 Implementation");
+                    ui.separator();
+
+                    ui.label("Input Stage");
+                    ui.label("Input Trim");
+                    ui.add(widgets::ParamSlider::for_param(&params.input_trim, setter));
+                    
+                    ui.separator();
+                    ui.label("Processing");
+                    ui.label("Attenuation Limit");
+                    ui.add(widgets::ParamSlider::for_param(&params.atten_lim, setter));
+                    ui.label("Mix");
+                    ui.add(widgets::ParamSlider::for_param(&params.mix, setter));
+
+                    ui.separator();
+                    ui.label("Output Stage");
+                    ui.label("Output Gain");
+                    ui.add(widgets::ParamSlider::for_param(&params.output_gain, setter));
+                });
+            },
+        )
+
+    }
+
 
     fn initialize(
         &mut self,
@@ -146,21 +212,26 @@ impl Plugin for DeepFilterPlugin {
 
         let mix = self.params.mix.smoothed.next();
         let atten = self.params.atten_lim.smoothed.next();
+        let input_gain_db = self.params.input_trim.smoothed.next();
+        let output_gain_db = self.params.output_gain.smoothed.next();
+        
+        let input_gain = 10.0f32.powf(input_gain_db / 20.0);
+        let output_gain = 10.0f32.powf(output_gain_db / 20.0);
+
         let num_samples = buffer.samples();
         let num_channels = buffer.channels();
         let hop = self.hop_size;
 
-        // 入力収集（モノラルにミックスダウン）
+        // 入力収集（インターリーブで保存）
         {
             let mut input_buf = self.input_buffer.lock().unwrap();
             for i in 0..num_samples {
-                let mut sum = 0.0f32;
                 for channel in buffer.iter_samples().nth(i).unwrap() {
-                    sum += *channel;
+                     input_buf.push(*channel * input_gain);
                 }
-                input_buf.push(sum / num_channels as f32);
             }
         }
+
 
         // DeepFilterNet でフレーム処理
         {
@@ -171,43 +242,65 @@ impl Plugin for DeepFilterPlugin {
             if let Some(ref mut df_model) = *model_guard {
                 df_model.set_atten_lim(atten);
 
-                while input_buf.len() >= hop {
-                    let mut in_frame = Array2::zeros((1, hop));
-                    let mut out_frame = Array2::zeros((1, hop));
+                // input_buf は [sample1_ch1, sample1_ch2, ..., sampleN_ch1, sampleN_ch2] のようにインターリーブされている前提
+                // 1フレームに必要なサンプル数 = hop * num_channels
+                let required_samples = hop * num_channels;
 
-                    for (i, &s) in input_buf[..hop].iter().enumerate() {
-                        in_frame[[0, i]] = s;
+                while input_buf.len() >= required_samples {
+                    // (channels, hop) の形状を作成
+                    let mut in_frame = Array2::zeros((num_channels, hop));
+                    let mut out_frame = Array2::zeros((num_channels, hop));
+
+                    // input_buf (Interleaved) -> in_frame (Planar: ch, time)
+                    for t in 0..hop {
+                        for ch in 0..num_channels {
+                            in_frame[[ch, t]] = input_buf[t * num_channels + ch];
+                        }
                     }
 
                     match df_model.process(in_frame.view(), out_frame.view_mut()) {
                         Ok(_) => {
-                            for i in 0..hop {
-                                output_buf.push(out_frame[[0, i]]);
+                            // out_frame (Planar) -> output_buf (Interleaved)
+                            for t in 0..hop {
+                                for ch in 0..num_channels {
+                                    output_buf.push(out_frame[[ch, t]]);
+                                }
                             }
                         }
                         Err(_) => {
-                            output_buf.extend_from_slice(&input_buf[..hop]);
+                            // エラー時は入力をバイパス
+                            output_buf.extend_from_slice(&input_buf[..required_samples]);
                         }
                     }
 
-                    input_buf.drain(..hop);
+                    input_buf.drain(..required_samples);
                 }
             }
         }
 
+
         // 出力書き込み
         {
             let mut output_buf = self.output_buffer.lock().unwrap();
-            if output_buf.len() >= num_samples {
+            // output_buf もインターリーブされている
+            let required_out_samples = num_samples * num_channels;
+
+            if output_buf.len() >= required_out_samples {
                 for (sample_idx, channel_samples) in buffer.iter_samples().enumerate() {
-                    let processed = output_buf[sample_idx];
+                    // sample_idx は時間のインデックス
+                    // output_buf は [t0_c0, t0_c1, t1_c0, t1_c1, ...]
+                    
+                    let mut ch_idx = 0;
                     for sample in channel_samples {
-                        let dry = *sample;
-                        *sample = dry * (1.0 - mix) + processed * mix;
+                        let processed = output_buf[sample_idx * num_channels + ch_idx];
+                        let dry = *sample * input_gain; 
+                        *sample = (dry * (1.0 - mix) + processed * mix) * output_gain;
+                        ch_idx += 1;
                     }
                 }
-                output_buf.drain(..num_samples);
+                output_buf.drain(..required_out_samples);
             }
+
         }
 
         ProcessStatus::Normal
@@ -222,8 +315,11 @@ impl DeepFilterPlugin {
         let hop = df.hop_size;
 
         *self.df_model.0.lock().unwrap() = Some(df);
-        *self.input_buffer.lock().unwrap() = Vec::with_capacity(hop * 4);
-        *self.output_buffer.lock().unwrap() = Vec::with_capacity(hop * 4);
+        // バッファサイズは (hop * channels) を考慮して少し多めに確保
+        let buf_capacity = hop * channels * 4;
+        *self.input_buffer.lock().unwrap() = Vec::with_capacity(buf_capacity);
+        *self.output_buffer.lock().unwrap() = Vec::with_capacity(buf_capacity);
+
 
         Ok(hop)
     }
@@ -247,3 +343,118 @@ impl Vst3Plugin for DeepFilterPlugin {
 
 nih_export_clap!(DeepFilterPlugin);
 nih_export_vst3!(DeepFilterPlugin);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nih_plug::prelude::*;
+
+    #[test]
+    fn test_input_trim_gain_calculation() {
+        // Test +6dB
+        let mut params = DeepFilterParams::default();
+        params.input_trim = FloatParam::new(
+            "Input Trim",
+            6.0,
+            FloatRange::Linear { min: -24.0, max: 24.0 },
+        );
+        let gain = 10.0f32.powf(params.input_trim.value() / 20.0);
+        assert!((gain - 1.995).abs() < 0.01, "Expected approx 2.0 for +6dB, got {}", gain);
+
+        // Test -6dB
+        params.input_trim = FloatParam::new(
+            "Input Trim",
+            -6.0,
+            FloatRange::Linear { min: -24.0, max: 24.0 },
+        );
+        let gain = 10.0f32.powf(params.input_trim.value() / 20.0);
+        assert!((gain - 0.501).abs() < 0.01, "Expected approx 0.5 for -6dB, got {}", gain);
+    }
+
+    #[test]
+    fn test_output_gain_calculation() {
+        let mut params = DeepFilterParams::default();
+        // Test +20dB
+        params.output_gain = FloatParam::new(
+            "Output Gain",
+            20.0,
+            FloatRange::Linear { min: -24.0, max: 24.0 },
+        );
+        let gain = 10.0f32.powf(params.output_gain.value() / 20.0);
+        assert!((gain - 10.0).abs() < 0.01, "Expected 10.0 for +20dB, got {}", gain);
+    }
+
+    #[test]
+    fn test_mix_calculation() {
+        let mut params = DeepFilterParams::default();
+        
+        // Test 50% Mix
+        params.mix = FloatParam::new(
+            "Mix",
+            0.5,
+            FloatRange::Linear { min: 0.0, max: 1.0 },
+        );
+        let mix = params.mix.value();
+        assert!((mix - 0.5).abs() < 0.001);
+
+        // Logic check: dry * (1.0 - mix) + wet * mix
+        let dry = 1.0;
+        let wet = 0.0;
+        let out = dry * (1.0 - mix) + wet * mix;
+        assert!((out - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_stereo_separation() {
+        // This test verifies the interleaving/de-interleaving logic used in process()
+        // to ensure it supports multi-channel processing without mono mixdown.
+        // Note: We are testing the logic logic because constructing a full nih_plug::Buffer
+        // without a host is complex.
+        
+        let num_channels = 2;
+        let hop = 480;
+        
+        // Simulate Input: Interleaved [L, R, L, R ...]
+        let mut input_interleaved = Vec::new();
+        for _ in 0..hop {
+            input_interleaved.push(1.0); // L = 1.0
+            input_interleaved.push(0.0); // R = 0.0
+        }
+        
+        // Logic from `process` (De-interleave)
+        let mut in_frame = Array2::zeros((num_channels, hop));
+        for t in 0..hop {
+            for ch in 0..num_channels {
+                in_frame[[ch, t]] = input_interleaved[t * num_channels + ch];
+            }
+        }
+        
+        // Verify De-interleave
+        for t in 0..hop {
+            assert_eq!(in_frame[[0, t]], 1.0, "Left channel should be 1.0");
+            assert_eq!(in_frame[[1, t]], 0.0, "Right channel should be 0.0");
+        }
+        
+        // Simulate Process (Identity for test)
+        let mut out_frame = in_frame.clone(); // Pass-through simulation
+        
+        // Logic from `process` (Re-interleave)
+        let mut output_interleaved = Vec::new();
+        for t in 0..hop {
+            for ch in 0..num_channels {
+                output_interleaved.push(out_frame[[ch, t]]);
+            }
+        }
+        
+        // Verify Re-interleave
+        for i in 0..hop*num_channels {
+            if i % 2 == 0 {
+                assert_eq!(output_interleaved[i], 1.0, "Output Left should be 1.0");
+            } else {
+                assert_eq!(output_interleaved[i], 0.0, "Output Right should be 0.0");
+            }
+        }
+    }
+}
+
+

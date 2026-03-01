@@ -8,12 +8,28 @@ license = "MIT OR Apache-2.0"
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
-nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git" }
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["assert_process_allocs"] }
+nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }
+
 
 # DeepFilterNet - df という名前でエクスポート
 # 「default-mode」を「default-model-ll」ならば、低遅延版。
-df = { git = "https://github.com/Rikorose/DeepFilterNet.git", tag = "v0.5.6", package = "deep_filter", features = ["tract", "default-model", "transforms"] }
+df = { path = "../../DeepFilterNet/libDF", package = "deep_filter", features = ["tract", "default-model", "transforms"] }
+
 
 # ndarray は df が使用するバージョンに合わせる
 ndarray = "0.15"
+
+# Pin tract versions to match DeepFilterNet upstream (v0.5.7-pre uses 0.21.4)
+tract-core = "=0.21.4"
+tract-onnx = "=0.21.4"
+tract-pulse = "=0.21.4"
+tract-hir = "=0.21.4"
+tract-data = "=0.21.4"
+tract-linalg = "=0.21.4"
+
 log = "0.4"
+
+
+
+
