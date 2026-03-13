@@ -5,7 +5,8 @@
 ## 特徴
 
 - **AIベースのノイズ除去**: DeepFilterNet3ニューラルネットワークによる高品質なノイズ抑制
-- **設定不要**: 適用するだけで自動的にノイズを除去
+- **トゥルー・ステレオ対応**: L/Rチャンネルを個別に処理することで、モノラルにダウンミックスされることなくステレオ音像（空間の広がり）を維持します。
+- **設定不要**: 適用するだけで自動的にノイズを除去。必要に応じて微調整も可能です。
 - **リアルタイム処理**: 48kHzでのリアルタイム処理に対応
 
 ## 動作要件
@@ -18,7 +19,7 @@
 
 ### ビルド済みプラグイン
 
-[Releases](https://github.com/YOUR_USERNAME/deepfilter-vst/releases) からダウンロードしてください。
+[Releases](https://github.com/YOUR_USERNAME/deepfilter-vst/releases) から最新のZIPファイルをダウンロードし、展開してください。
 
 #### macOS
 
@@ -61,20 +62,26 @@ cargo xtask bundle deepfilter-vst --release
 ```
 
 **ビルド成果物:** `target/bundled/deepfilter-vst.vst3`
+成果物をZIPにまとめる場合は以下のPowerShellコマンドが利用できます：
+```powershell
+Compress-Archive -Path "DeepFilterNet3-VST3-Win\target\bundled\*" -DestinationPath "DeepFilterNet3-VST3-Win-Release.zip" -Force
+```
 
 ## 使用方法
 
 1. プラグインをインストールします。
 2. DAWのプロジェクト設定（サンプルレート）を **48kHz** に設定します。
 3. オーディオトラックに「DeepFilter Noise Reduction」を適用します。
-4. 完了！（パラメータ調整は通常不要です）
+4. 必要に応じてInput TrimやOutput Gainを調整します。
 
 ## パラメータ
 
-| パラメータ | 説明 | デフォルト |
+| パラメータ | 説明 | 範囲 / デフォルト |
 | :--- | :--- | :--- |
-| **Attenuation Limit** | ノイズ抑制量 (dB) | 100 |
-| **Mix** | Dry/Wet比率 | 100% |
+| **Input Trim** | 処理前の入力ゲイン補正 | -24dB 〜 +24dB (デフォルト: 0dB) |
+| **Attenuation Limit** | ノイズの最大抑制量 | 0dB 〜 100dB (デフォルト: 100dB) |
+| **Mix** | Dry/Wet比率 (パラレル処理用) | 0% 〜 100% (デフォルト: 100%) |
+| **Output Gain** | 処理後の最終ゲイン補正 | -24dB 〜 +24dB (デフォルト: 0dB) |
 
 ## ライセンス
 

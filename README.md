@@ -5,7 +5,8 @@ A real-time noise reduction VST3 plugin using [DeepFilterNet3](https://github.co
 ## Features
 
 - **AI-Based Noise Reduction**: High-quality noise suppression powered by the DeepFilterNet3 neural network.
-- **Zero Configuration**: Automatically removes noise just by applying the plugin.
+- **True Stereo Processing**: Preserves spatial imaging by processing Left and Right channels independently, rather than summing to mono.
+- **Zero Configuration**: Automatically removes noise just by applying the plugin, with manual tweaking available if desired.
 - **Real-time Processing**: Supports real-time processing at 48kHz.
 
 ## Requirements
@@ -18,7 +19,7 @@ A real-time noise reduction VST3 plugin using [DeepFilterNet3](https://github.co
 
 ### Pre-built Binaries
 
-Download the latest version from [Releases](https://github.com/YOUR_USERNAME/deepfilter-vst/releases).
+Download the latest release ZIP from [Releases](https://github.com/YOUR_USERNAME/deepfilter-vst/releases) and extract it.
 
 #### macOS
 
@@ -61,20 +62,26 @@ cargo xtask bundle deepfilter-vst --release
 ```
 
 **Build Artifact:** `target/bundled/deepfilter-vst.vst3`
+You can also package the artifacts into a zip by running:
+```powershell
+Compress-Archive -Path "DeepFilterNet3-VST3-Win\target\bundled\*" -DestinationPath "DeepFilterNet3-VST3-Win-Release.zip" -Force
+```
 
 ## Usage
 
 1. Install the plugin.
 2. Set your DAW project sample rate to **48kHz**.
 3. Apply "DeepFilter Noise Reduction" to your audio track.
-4. Done! (Parameter adjustment is usually not required).
+4. Adjust the Input Trim or Output Gain if necessary.
 
 ## Parameters
 
-| Parameter | Description | Default |
+| Parameter | Description | Range / Default |
 | :--- | :--- | :--- |
-| **Attenuation Limit** | Noise reduction amount (dB) | 100 |
-| **Mix** | Dry/Wet ratio | 100% |
+| **Input Trim** | Pre-processing gain adjustment | -24dB to +24dB (Default: 0dB) |
+| **Attenuation Limit** | Maximum noise reduction amount | 0dB to 100dB (Default: 100dB) |
+| **Mix** | Dry/Wet ratio for parallel processing | 0% to 100% (Default: 100%) |
+| **Output Gain** | Post-processing volume adjustment | -24dB to +24dB (Default: 0dB) |
 
 ## License
 
