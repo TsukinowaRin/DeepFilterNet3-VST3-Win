@@ -36,8 +36,8 @@ Download the latest release assets from:
 
 Recommended asset names:
 
-- `DeepFilterNet3-VST3-Win-<version>-windows-x86_64.zip`
-- `DeepFilterNet3-VST3-Win-<version>-windows-x86_64.zip.sha256`
+- `deepfilter-vst-windows-x86_64.zip`
+- `deepfilter-vst-windows-x86_64.zip.sha256`
 
 ## Installation
 
@@ -79,7 +79,7 @@ git clone https://github.com/Rikorose/DeepFilterNet.git
 cd DeepFilterNet3-VST3-Win
 cargo test
 cargo xtask bundle deepfilter-vst --release
-pwsh ./scripts/package-release.ps1 -Version v0.1.1
+pwsh ./scripts/package-release.ps1 -ArtifactBase deepfilter-vst-windows-x86_64
 ```
 
 Recommended Rust/Cargo toolchain:
@@ -90,12 +90,13 @@ Build outputs:
 
 - `target/bundled/deepfilter-vst.vst3`
 - `target/bundled/deepfilter-vst.clap`
-- `dist/DeepFilterNet3-VST3-Win-<version>-windows-x86_64.zip`
+- `dist/deepfilter-vst-windows-x86_64.zip`
 
 ## Release Process
 
-- Automated release: push a tag like `v0.1.1`
-- Manual packaging: `pwsh ./scripts/package-release.ps1 -Version v0.1.1`
+- Windows 1.0 channel: push the `windows` tag
+- Release name: `v1.0.0-deepfilter-vst3-windows`
+- Manual packaging: `pwsh ./scripts/package-release.ps1 -ArtifactBase deepfilter-vst-windows-x86_64`
 - Release automation is defined in `.github/workflows/release.yml`
 
 ## Repository Layout

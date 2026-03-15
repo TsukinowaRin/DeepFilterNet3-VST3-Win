@@ -36,8 +36,8 @@
 
 想定している配布ファイル名:
 
-- `DeepFilterNet3-VST3-Win-<version>-windows-x86_64.zip`
-- `DeepFilterNet3-VST3-Win-<version>-windows-x86_64.zip.sha256`
+- `deepfilter-vst-windows-x86_64.zip`
+- `deepfilter-vst-windows-x86_64.zip.sha256`
 
 ## インストール
 
@@ -79,7 +79,7 @@ git clone https://github.com/Rikorose/DeepFilterNet.git
 cd DeepFilterNet3-VST3-Win
 cargo test
 cargo xtask bundle deepfilter-vst --release
-pwsh ./scripts/package-release.ps1 -Version v0.1.1
+pwsh ./scripts/package-release.ps1 -ArtifactBase deepfilter-vst-windows-x86_64
 ```
 
 推奨 Rust/Cargo toolchain:
@@ -90,12 +90,13 @@ pwsh ./scripts/package-release.ps1 -Version v0.1.1
 
 - `target/bundled/deepfilter-vst.vst3`
 - `target/bundled/deepfilter-vst.clap`
-- `dist/DeepFilterNet3-VST3-Win-<version>-windows-x86_64.zip`
+- `dist/deepfilter-vst-windows-x86_64.zip`
 
 ## Release 作成
 
-- 自動リリース: `v0.1.1` のようなタグを push
-- 手動パッケージ: `pwsh ./scripts/package-release.ps1 -Version v0.1.1`
+- Windows 1.0 チャンネル: `windows` タグを push
+- Release 名: `v1.0.0-deepfilter-vst3-windows`
+- 手動パッケージ: `pwsh ./scripts/package-release.ps1 -ArtifactBase deepfilter-vst-windows-x86_64`
 - 自動化の定義: `.github/workflows/release.yml`
 
 ## リポジトリ構成

@@ -1,6 +1,9 @@
 param(
     [Parameter(Mandatory = $false)]
-    [string]$Version = "dev"
+    [string]$Version = "dev",
+
+    [Parameter(Mandatory = $false)]
+    [string]$ArtifactBase = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -8,7 +11,11 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $bundleDir = Join-Path $repoRoot "target/bundled"
 $distDir = Join-Path $repoRoot "dist"
-$artifactBase = "DeepFilterNet3-VST3-Win-$Version-windows-x86_64"
+if ([string]::IsNullOrWhiteSpace($ArtifactBase)) {
+    $artifactBase = "DeepFilterNet3-VST3-Win-$Version-windows-x86_64"
+} else {
+    $artifactBase = $ArtifactBase
+}
 $stageRoot = Join-Path $distDir "stage"
 $stageDir = Join-Path $stageRoot $artifactBase
 $zipPath = Join-Path $distDir "$artifactBase.zip"
