@@ -2,6 +2,17 @@
 
 Real-time noise reduction plugin for Windows, built with `nih_plug` and powered by `DeepFilterNet3`.
 
+- Japanese README: [`README_ja.md`](README_ja.md)
+- Plugin name in DAWs: `DeepFilter Noise Reduction`
+
+## Quick Start
+
+1. Download the latest `windows-x86_64.zip` from Releases.
+2. Extract it.
+3. Copy `deepfilter-vst.vst3` to `C:\Program Files\Common Files\VST3\`.
+4. Set your DAW project to `48 kHz`.
+5. Load `DeepFilter Noise Reduction` on a mono or stereo track.
+
 ## Scope
 
 - Primary target: Windows x86_64
@@ -48,6 +59,7 @@ Recommended asset names:
 
 - Windows host with VST3 support
 - DAW project sample rate set to `48 kHz`
+- Mono or stereo input
 
 ## Build From Source
 

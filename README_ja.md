@@ -2,6 +2,17 @@
 
 `nih_plug` と `DeepFilterNet3` を使って実装した、Windows 向けリアルタイムノイズ除去プラグインです。
 
+- English README: [`README.md`](README.md)
+- DAW 上のプラグイン名: `DeepFilter Noise Reduction`
+
+## クイックスタート
+
+1. Releases から最新の `windows-x86_64.zip` を取得します。
+2. 展開します。
+3. `deepfilter-vst.vst3` を `C:\Program Files\Common Files\VST3\` にコピーします。
+4. DAW のプロジェクトを `48 kHz` に設定します。
+5. mono または stereo トラックへ `DeepFilter Noise Reduction` を挿します。
+
 ## 対応範囲
 
 - 主対象: Windows x86_64
@@ -48,6 +59,7 @@
 
 - VST3 を読み込める Windows ホスト
 - DAW プロジェクトのサンプルレートが `48 kHz`
+- mono / stereo 入力
 
 ## ソースからビルド
 
