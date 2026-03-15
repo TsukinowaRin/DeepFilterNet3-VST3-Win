@@ -1,93 +1,113 @@
-# DeepFilter VST3 Plugin
+# DeepFilterNet3 VST3 for Windows
 
-A real-time noise reduction VST3 plugin using [DeepFilterNet3](https://github.com/Rikorose/DeepFilterNet).
+Real-time noise reduction plugin for Windows, built with `nih_plug` and powered by `DeepFilterNet3`.
+
+## Scope
+
+- Primary target: Windows x86_64
+- Primary format: VST3
+- Additional artifact: CLAP is bundled from the same source tree
+- Required sample rate: 48 kHz
+- Supported channel layouts: mono / stereo
 
 ## Features
 
-- **AI-Based Noise Reduction**: High-quality noise suppression powered by the DeepFilterNet3 neural network.
-- **True Stereo Processing**: Preserves spatial imaging by processing Left and Right channels independently, rather than summing to mono.
-- **Zero Configuration**: Automatically removes noise just by applying the plugin, with manual tweaking available if desired.
-- **Real-time Processing**: Supports real-time processing at 48kHz.
+- DeepFilterNet3-based real-time denoising
+- True stereo processing without mono downmix
+- `Input Trim`, `Attenuation Limit`, `Mix`, `Output Gain`
+- Simple GUI implemented with `nih_plug_egui`
 
-## Requirements
+## Download
 
-- **Sample Rate**: 48kHz (Required)
-- **Supported OS**: macOS (Apple Silicon / Intel), Windows, Linux
-- **Supported DAWs**: DaVinci Resolve, Logic Pro, Ableton Live, Reaper, Cubase, and other VST3-compatible DAWs.
+Download the latest release assets from:
+
+- <https://github.com/TsukinowaRin/DeepFilterNet3-VST3-Win/releases>
+
+Recommended asset names:
+
+- `DeepFilterNet3-VST3-Win-<version>-windows-x86_64.zip`
+- `DeepFilterNet3-VST3-Win-<version>-windows-x86_64.zip.sha256`
 
 ## Installation
 
-### Pre-built Binaries
-
-Download the latest release ZIP from [Releases](https://github.com/YOUR_USERNAME/deepfilter-vst/releases) and extract it.
-
-#### macOS
-
-**System-wide installation:**
-```bash
-sudo cp -r deepfilter-vst.vst3 /Library/Audio/Plug-Ins/VST3/
-```
-
-**Or user-only installation:**
-```bash
-cp -r deepfilter-vst.vst3 ~/Library/Audio/Plug-Ins/VST3/
-```
-
-#### Windows
-
-Copy the `deepfilter-vst.vst3` folder to the following path:
-```text
-C:\Program Files\Common Files\VST3\
-```
-
-#### Linux
-
-```bash
-cp -r deepfilter-vst.vst3 ~/.vst3/
-```
-
----
-
-### Build from Source
-
-**Prerequisites:**
-- Rust (1.70 or later)
-
-**Build Instructions:**
-
-```bash
-git clone https://github.com/YOUR_USERNAME/deepfilter-vst.git
-cd deepfilter-vst
-cargo xtask bundle deepfilter-vst --release
-```
-
-**Build Artifact:** `target/bundled/deepfilter-vst.vst3`
-You can also package the artifacts into a zip by running:
-```powershell
-Compress-Archive -Path "DeepFilterNet3-VST3-Win\target\bundled\*" -DestinationPath "DeepFilterNet3-VST3-Win-Release.zip" -Force
-```
-
-## Usage
-
-1. Install the plugin.
-2. Set your DAW project sample rate to **48kHz**.
-3. Apply "DeepFilter Noise Reduction" to your audio track.
-4. Adjust the Input Trim or Output Gain if necessary.
+1. Download and extract the latest release ZIP.
+2. Copy `deepfilter-vst.vst3` to `C:\Program Files\Common Files\VST3\`.
+3. If you want the CLAP build as well, copy `deepfilter-vst.clap` to `C:\Program Files\Common Files\CLAP\`.
+4. Rescan plugins in your DAW.
 
 ## Parameters
 
-| Parameter | Description | Range / Default |
-| :--- | :--- | :--- |
-| **Input Trim** | Pre-processing gain adjustment | -24dB to +24dB (Default: 0dB) |
-| **Attenuation Limit** | Maximum noise reduction amount | 0dB to 100dB (Default: 100dB) |
-| **Mix** | Dry/Wet ratio for parallel processing | 0% to 100% (Default: 100%) |
-| **Output Gain** | Post-processing volume adjustment | -24dB to +24dB (Default: 0dB) |
+| Parameter | Description | Range | Default |
+| :--- | :--- | :--- | :--- |
+| `Input Trim` | Gain before denoising | `-24 dB .. +24 dB` | `0 dB` |
+| `Attenuation Limit` | Maximum noise reduction amount | `0 dB .. 100 dB` | `100 dB` |
+| `Mix` | Dry/Wet blend | `0% .. 100%` | `100%` |
+| `Output Gain` | Final output gain | `-24 dB .. +24 dB` | `0 dB` |
+
+## Requirements
+
+- Windows host with VST3 support
+- DAW project sample rate set to `48 kHz`
+
+## Build From Source
+
+This repository currently expects the upstream `DeepFilterNet` source tree to exist next to this repository:
+
+```text
+workspace/
+  DeepFilterNet3-VST3-Win/
+  DeepFilterNet/
+```
+
+Example setup:
+
+```bash
+git clone https://github.com/TsukinowaRin/DeepFilterNet3-VST3-Win.git
+git clone https://github.com/Rikorose/DeepFilterNet.git
+cd DeepFilterNet3-VST3-Win
+cargo test
+cargo xtask bundle deepfilter-vst --release
+pwsh ./scripts/package-release.ps1 -Version v0.1.0
+```
+
+Recommended Rust/Cargo toolchain:
+
+- `rustup default 1.93.0`
+
+Build outputs:
+
+- `target/bundled/deepfilter-vst.vst3`
+- `target/bundled/deepfilter-vst.clap`
+- `dist/DeepFilterNet3-VST3-Win-<version>-windows-x86_64.zip`
+
+## Release Process
+
+- Automated release: push a tag like `v0.1.0`
+- Manual packaging: `pwsh ./scripts/package-release.ps1 -Version v0.1.0`
+- Release automation is defined in `.github/workflows/release.yml`
+
+## Repository Layout
+
+- `plugin/`: plugin implementation
+- `xtask/`: `nih_plug_xtask` entry point
+- `scripts/package-release.ps1`: release ZIP generator
+- `.github/workflows/release.yml`: GitHub Releases automation
+
+## Known Limitations
+
+- `48 kHz` is mandatory because the current DeepFilterNet runtime is initialized only for that sample rate.
+- Official support is focused on Windows VST3 delivery.
+- Building from source requires the sibling `DeepFilterNet` checkout described above.
 
 ## License
 
-MIT License
+`deepfilter-vst` is published under `MIT OR Apache-2.0`.
+
+DeepFilterNet remains subject to its own license terms:
+
+- <https://github.com/Rikorose/DeepFilterNet>
 
 ## Credits
 
-- [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet) - Hendrik Schröter
-- [nih-plug](https://github.com/robbert-vdh/nih-plug) - Robbert van der Helm
+- `DeepFilterNet` by Hendrik Schroter and contributors
+- `nih-plug` by Robbert van der Helm

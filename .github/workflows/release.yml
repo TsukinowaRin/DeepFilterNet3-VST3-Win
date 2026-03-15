@@ -1,0 +1,62 @@
+name: Release Windows Build
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label used for the packaged ZIP"
+        required: false
+        default: "manual"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout plugin repository
+        uses: actions/checkout@v4
+
+      - name: Checkout DeepFilterNet dependency
+        shell: pwsh
+        run: git clone --depth 1 https://github.com/Rikorose/DeepFilterNet.git ../DeepFilterNet
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run tests
+        run: cargo test
+
+      - name: Build bundled plugins
+        run: cargo xtask bundle deepfilter-vst --release
+
+      - name: Package release assets
+        shell: pwsh
+        run: |
+          $version = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } elseif ("${{ github.event.inputs.version }}" -ne "") { "${{ github.event.inputs.version }}" } else { "manual" }
+          ./scripts/package-release.ps1 -Version $version
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepfilter-vst-windows
+          path: |
+            dist/*.zip
+            dist/*.sha256
+
+      - name: Publish GitHub release assets
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.zip
+            dist/*.sha256
+          generate_release_notes: true
