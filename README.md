@@ -79,7 +79,7 @@ git clone https://github.com/Rikorose/DeepFilterNet.git
 cd DeepFilterNet3-VST3-Win
 cargo test
 cargo xtask bundle deepfilter-vst --release
-pwsh ./scripts/package-release.ps1 -Version v0.1.0
+pwsh ./scripts/package-release.ps1 -Version v0.1.1
 ```
 
 Recommended Rust/Cargo toolchain:
@@ -94,8 +94,8 @@ Build outputs:
 
 ## Release Process
 
-- Automated release: push a tag like `v0.1.0`
-- Manual packaging: `pwsh ./scripts/package-release.ps1 -Version v0.1.0`
+- Automated release: push a tag like `v0.1.1`
+- Manual packaging: `pwsh ./scripts/package-release.ps1 -Version v0.1.1`
 - Release automation is defined in `.github/workflows/release.yml`
 
 ## Repository Layout
@@ -111,6 +111,27 @@ Build outputs:
 - Official support is focused on Windows VST3 delivery.
 - Building from source requires the sibling `DeepFilterNet` checkout described above.
 
+---
+
+### 【WARNING】Known Issues with DaVinci Resolve 20
+
+When using the current DeepFilterNet3-VST3 plugin (nih-plug / Rust libDF based) with DaVinci Resolve 20, **a critical issue has been confirmed where audio output becomes completely "silent" during offline rendering execution on the Deliver page**.
+
+This is caused by fundamental incompatibility between the plugin's processing pipeline and DaVinci Resolve's offline rendering behavior. The specific issues (causes) are as follows:
+
+*   **Sample Rate Incompatibility and Limitations**
+    The Rust `libdf` library strictly requires a 48kHz sample rate, but DaVinci Resolve may change the sample rate during rendering, preventing normal processing from occurring.
+*   **Poor Internal State Initialization During Transition to Offline Processing**
+    When DaVinci Resolve transitions from real-time playback to offline (non-real-time) rendering, it reinitializes the plugin (re-calling `prepareToPlay`) and processes audio blocks at maximum speed. In this flow, the internal states of STFT (Short-Time Fourier Transform) such as overlap buffers, RNN hidden states, and normalization statistics are not properly reset/reinitialized, causing continuous output of silence (zeros).
+*   **Poor Adaptation to Dynamic Buffer Size Changes**
+    During offline rendering, DaVinci Resolve sometimes uses different buffer sizes than during real-time playback. The current library, which requires strict buffer processing, cannot properly adapt to these size variations.
+*   **Latency Compensation Malfunction**
+    For the approximately 40ms algorithmic latency caused by internal processing (20ms window, 10ms hop size, 2-frame lookahead), latency compensation does not function correctly in DaVinci Resolve's offline renderer environment.
+
+Please note that this plugin currently cannot be used for export (delivery) in DaVinci Resolve 20.
+
+---
+
 ## License
 
 `deepfilter-vst` is published under `MIT OR Apache-2.0`.
@@ -121,5 +142,5 @@ DeepFilterNet remains subject to its own license terms:
 
 ## Credits
 
-- `DeepFilterNet` by Hendrik Schroter and contributors
-- `nih-plug` by Robbert van der Helm
+- [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet) - Hendrik Schröter
+- [nih-plug](https://github.com/robbert-vdh/nih-plug) - Robbert van der Helm

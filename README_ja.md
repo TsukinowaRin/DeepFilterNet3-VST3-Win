@@ -79,7 +79,7 @@ git clone https://github.com/Rikorose/DeepFilterNet.git
 cd DeepFilterNet3-VST3-Win
 cargo test
 cargo xtask bundle deepfilter-vst --release
-pwsh ./scripts/package-release.ps1 -Version v0.1.0
+pwsh ./scripts/package-release.ps1 -Version v0.1.1
 ```
 
 推奨 Rust/Cargo toolchain:
@@ -94,8 +94,8 @@ pwsh ./scripts/package-release.ps1 -Version v0.1.0
 
 ## Release 作成
 
-- 自動リリース: `v0.1.0` のようなタグを push
-- 手動パッケージ: `pwsh ./scripts/package-release.ps1 -Version v0.1.0`
+- 自動リリース: `v0.1.1` のようなタグを push
+- 手動パッケージ: `pwsh ./scripts/package-release.ps1 -Version v0.1.1`
 - 自動化の定義: `.github/workflows/release.yml`
 
 ## リポジトリ構成
@@ -111,6 +111,27 @@ pwsh ./scripts/package-release.ps1 -Version v0.1.0
 - 公式サポート対象は Windows VST3 配布です。
 - ソースビルドには上記の sibling `DeepFilterNet` 配置が必要です。
 
+---
+
+### 【警告】DaVinci Resolve 20における既知の問題点
+
+現在のDeepFilterNet3-VST3プラグイン（nih-plug / Rust libDFベース）をDaVinci Resolve 20で使用した場合、**デリバーページでのオフラインレンダリング実行時に音声出力が完全に「無音」になる致命的な問題**が確認されています。
+
+これは、本プラグインの処理パイプラインとDaVinci Resolveのオフラインレンダリングの挙動との間にある、根本的な非互換性に起因するものです。具体的な問題点（原因）は以下の通りです。
+
+*   **サンプルレートの非互換と制限**
+    Rustの`libdf`ライブラリは厳密に48kHzのサンプルレートを要求しますが、DaVinci Resolveはレンダリング中にサンプルレートを変更する可能性があり、処理が正常に行われません。
+*   **オフライン処理への移行時の内部ステート初期化不良**
+    DaVinci Resolveがリアルタイム再生からオフライン（非リアルタイム）レンダリングへ移行する際、プラグインを再初期化（`prepareToPlay`の再呼び出し）し、最高速度でオーディオブロックの処理を行います。このフローにおいて、STFT（短時間フーリエ変換）の内部状態（オーバーラップバッファ等）やRNNの隠れ状態、正規化の統計情報が適切にリセット・再初期化されないため、無音（ゼロ）が出力され続けます。
+*   **動的なバッファサイズ変更への適応不全**
+    オフラインレンダリング時、DaVinci Resolveはリアルタイム再生時とは異なるバッファサイズを使用することがあります。厳格なバッファ処理を要求する現行のライブラリは、このサイズ変動に適切に適応できません。
+*   **レイテンシー補正の不具合**
+    内部処理（20msのウィンドウ、10msのホップサイズ、2フレームの先読み）によって発生する約40msのアルゴリズムレイテンシーに対し、DaVinci Resolveのオフラインレンダラー環境下ではレイテンシー補正が正しく機能しません。
+
+現在、DaVinci Resolve 20でのエクスポート（デリバー）において本プラグインを使用することはできませんのでご注意ください。
+
+---
+
 ## ライセンス
 
 `deepfilter-vst` は `MIT OR Apache-2.0` です。
@@ -121,5 +142,5 @@ pwsh ./scripts/package-release.ps1 -Version v0.1.0
 
 ## Credits
 
-- `DeepFilterNet`
-- `nih-plug`
+- [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet) - Hendrik Schröter
+- [nih-plug](https://github.com/robbert-vdh/nih-plug) - Robbert van der Helm
