@@ -2,7 +2,7 @@
 
 Real-time noise reduction plugin for Windows, built with `nih_plug` and powered by `DeepFilterNet3`.
 
-- Japanese README: [`README_ja.md`](README_ja.md)
+- Japanese version / 日本語版: [`README_ja.md`](README_ja.md)
 - Plugin name in DAWs: `DeepFilter Noise Reduction`
 
 ## Quick Start
