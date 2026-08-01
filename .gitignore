@@ -13,3 +13,14 @@
 
 # Cargo.lock はライブラリでは除外することもあるが、アプリケーションでは含める
 # 今回は含める（再現性のため）
+
+# エージェントハーネスのローカル生成物
+Old/
+__pycache__/
+*.pyc
+CLAUDE.local.md
+.claude/settings.local.json
+.antigravitycli/
+.obsidian/
+tmp/
+.loop/
