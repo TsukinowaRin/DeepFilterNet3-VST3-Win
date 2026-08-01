@@ -33,7 +33,7 @@
 - [x] `python3 scripts/sync_shared_context.py --check` が pass する
 - [x] `bash scripts/security_smoke.sh` と `bash scripts/smoke_template.sh` が pass する
 - [x] `git diff --check` と差分 review が pass する
-- [ ] migration 差分が commit され、origin の topic branch と commit が一致する
+- [x] migration 差分が commit され、origin の topic branch と commit が一致する
 
 ## 仮定
 

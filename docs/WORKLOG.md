@@ -12,32 +12,34 @@
 ## 現在の状態
 
 - 現在の作業:
-  - Cargo 導入後の Universal Agent Harness v2.6.1 移行差分 commit / push
+  - Cargo 導入後の Universal Agent Harness v2.6.1 移行差分 commit / push（完了）
 - 直近の状態:
-  - Rust / Cargo 導入と全ハーネス gate が完了。commit 前 checkpoint 実施中
+  - migration commit `db748b7` を `origin/codex/harness-v2.6.1-migration` へ push 済み
 - 次にやること:
-  - staged diff を確認して migration commit を作成・push する
+  - なし。必要なら GitHub PR を作成する
 - ブロッカー:
   - なし
 - 次に最初に読む文書:
   - `docs/REQS.md`, `docs/EXECPLAN_2026-08-01_harness-v2.6.1-migration.md`
 - 次に最初に実行するコマンド:
-  - `git diff --cached --check`
+  - `git status --short --branch`
 
 ---
 
 ## エントリ
 
-### 2026-08-01 JST（Cargo 導入と migration commit / push — 実行中）
+### 2026-08-01 JST（Cargo 導入と migration commit / push — 完了）
 
 - 目的: 前回未実行だった Rust formatter を試し、v2.6.1 harness migration を commit / push する
 - toolchain: 公式 rustup installer で WSL user 環境へ `rustc 1.93.0`、`cargo 1.93.0`、`rustfmt 1.8.0` を導入。admin 権限は不使用
 - dependency setup: README の標準構成に合わせ、欠けていた `../DeepFilterNet` を upstream `Rikorose/DeepFilterNet` の shallow clone（`d375b2d`）として配置。対象 repo の外なので commit には含めない
 - formatter: `cargo fmt --all -- --check` は実行可能になったが、sibling `DeepFilterNet/libDF/src/capi.rs` と既存 `plugin/src/lib.rs` の formatting diff で exit 1。今回の依頼外なのでファイルは変更していない
-- 検証: toolchain version、shared context、security smoke、Windows optional を省いた template smoke、tracked / untracked whitespace、製品ファイル非変更を確認
-- 未完了: staged diff review、commit、push
+- 検証: toolchain version、shared context、security smoke、Windows optional を省いた template smoke、staged whitespace、製品ファイル非変更を確認
+- commit: `db748b7470ef1322edd83309c89e4d3c6a0b5b0b`（101 files、v2.6.1 harness migration）。push 前の初回 commit は author identity 未設定で失敗したため、既存履歴と同じ identity を repo-local に設定して再実行
+- push: `origin/codex/harness-v2.6.1-migration` を新規作成し upstream tracking を設定
+- 未完了: なし。PR 作成・main merge は非目標
 - ブロッカー: なし。formatter failure は pre-existing source formatting と `--all` による local path dependency 対象化
-- 次の一手: `git diff --cached --check`
+- 次の一手: 必要なら GitHub の compare URL から PR を作成する
 
 ### 2026-08-01 JST（Universal Agent Harness v2.6.1 移行 — 完了）
 
