@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version label used for the packaged ZIP"
+        description: "Version label used for the installer"
         required: false
         default: "manual"
 
@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2025
 
     steps:
       - name: Checkout plugin repository
@@ -26,45 +26,79 @@ jobs:
       - name: Prepare release metadata
         id: meta
         shell: pwsh
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
-          if ("${{ github.ref_name }}" -eq "windows") {
+          if ($env:REF_NAME -eq "windows") {
             "artifact_base=deepfilter-vst-windows-x86_64" >> $env:GITHUB_OUTPUT
+            "app_version=1.0.0" >> $env:GITHUB_OUTPUT
             "release_name=v1.0.0-deepfilter-vst3-windows" >> $env:GITHUB_OUTPUT
           } else {
-            $version = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } elseif ("${{ github.event.inputs.version }}" -ne "") { "${{ github.event.inputs.version }}" } else { "manual" }
+            $version = if ($env:REF_TYPE -eq "tag") { $env:REF_NAME } elseif (-not [string]::IsNullOrWhiteSpace($env:INPUT_VERSION)) { $env:INPUT_VERSION } else { "manual" }
+            if ($version -notmatch '^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$') {
+              throw "Version contains unsupported characters."
+            }
             "artifact_base=DeepFilterNet3-VST3-Win-$version-windows-x86_64" >> $env:GITHUB_OUTPUT
+            "app_version=$version" >> $env:GITHUB_OUTPUT
             "release_name=$version" >> $env:GITHUB_OUTPUT
           }
 
-      - name: Checkout DeepFilterNet dependency
-        shell: pwsh
-        run: git clone --depth 1 https://github.com/Rikorose/DeepFilterNet.git ../DeepFilterNet
-
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.93.0
 
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
 
       - name: Run tests
-        run: cargo test
+        run: cargo test --locked
 
       - name: Build bundled plugins
-        run: cargo xtask bundle deepfilter-vst --release
+        run: cargo run --locked --package xtask --release -- bundle deepfilter-vst --release
 
-      - name: Package release assets
+      - name: Locate Inno Setup compiler
+        id: inno
         shell: pwsh
         run: |
-          $version = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } elseif ("${{ github.event.inputs.version }}" -ne "") { "${{ github.event.inputs.version }}" } else { "manual" }
-          ./scripts/package-release.ps1 -Version $version -ArtifactBase "${{ steps.meta.outputs.artifact_base }}"
+          $command = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
+          $candidates = @(
+            if ($null -ne $command) { $command.Source }
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { $_ -and (Test-Path $_ -PathType Leaf) }
+          $compiler = $candidates | Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace($compiler)) {
+            throw "Inno Setup compiler was not found on the runner."
+          }
+          "compiler=$compiler" >> $env:GITHUB_OUTPUT
+          Write-Host "Using Inno Setup compiler: $compiler"
+
+      - name: Build Windows installer
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ steps.meta.outputs.app_version }}
+          ARTIFACT_BASE: ${{ steps.meta.outputs.artifact_base }}
+          INNO_COMPILER: ${{ steps.inno.outputs.compiler }}
+        run: |
+          ./scripts/package-release.ps1 -Version $env:APP_VERSION -ArtifactBase $env:ARTIFACT_BASE -InnoCompiler $env:INNO_COMPILER
+
+      - name: Test installer and uninstaller
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem dist -Filter "*-setup.exe")
+          if ($installers.Count -ne 1) {
+            throw "Expected one installer, found $($installers.Count)."
+          }
+          ./scripts/test-installer.ps1 -InstallerPath $installers[0].FullName
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: deepfilter-vst-windows
           path: |
-            dist/*.zip
-            dist/*.sha256
+            dist/*-setup.exe
+            dist/*-setup.exe.sha256
 
       - name: Publish GitHub release assets
         if: github.ref_type == 'tag' && github.ref_name != 'windows'
@@ -72,8 +106,8 @@ jobs:
         with:
           name: ${{ steps.meta.outputs.release_name }}
           files: |
-            dist/*.zip
-            dist/*.sha256
+            dist/*-setup.exe
+            dist/*-setup.exe.sha256
           generate_release_notes: true
 
       - name: Publish Windows 1.0 channel release
@@ -83,5 +117,5 @@ jobs:
           name: ${{ steps.meta.outputs.release_name }}
           body_path: .github/release-body-windows.md
           files: |
-            dist/*.zip
-            dist/*.sha256
+            dist/*-setup.exe
+            dist/*-setup.exe.sha256

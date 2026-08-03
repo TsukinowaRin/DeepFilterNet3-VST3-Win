@@ -1,25 +1,33 @@
-use nih_plug::prelude::*;
-use nih_plug_egui::{create_egui_editor, egui, EguiState, widgets};
-use std::sync::{Arc, Mutex};
+mod stream;
 
+use std::sync::Arc;
 
 use df::tract::{DfParams, DfTract, RuntimeParams};
-use ndarray::Array2;
+use ndarray::{ArrayView2, ArrayViewMut2};
+use nih_plug::prelude::*;
+use nih_plug_egui::{create_egui_editor, egui, widgets, EguiState};
 
-// DfTract を Mutex でラップしてスレッドセーフに
-struct DfWrapper(Mutex<Option<DfTract>>);
+use stream::StreamState;
 
-// Send と Sync を手動で実装（Mutex で保護されているため安全）
-unsafe impl Send for DfWrapper {}
-unsafe impl Sync for DfWrapper {}
+/// Exclusive owner for tract's non-`Send` working and pristine inference states.
+///
+/// SAFETY: `DfTract` is non-`Send` because it contains `Rc<Tensor>` and erased operation state.
+/// Cloning can leave internal `Rc` aliases between these two models, so the wrapper keeps them in
+/// one move unit. It never exposes either model outside the plugin, access is exclusive through
+/// `&mut self`, and it deliberately does not implement `Sync`.
+struct ExclusiveModels {
+    current: DfTract,
+    pristine: DfTract,
+}
+
+unsafe impl Send for ExclusiveModels {}
 
 struct DeepFilterPlugin {
     params: Arc<DeepFilterParams>,
-    df_model: DfWrapper,
-    input_buffer: Mutex<Vec<f32>>,
-    output_buffer: Mutex<Vec<f32>>,
-    hop_size: usize,
-    is_initialized: bool,
+    models: Option<ExclusiveModels>,
+    stream: Option<StreamState>,
+    skip_next_model_reset: bool,
+    model_failures: u64,
 }
 
 #[derive(Params)]
@@ -44,10 +52,12 @@ impl Default for DeepFilterParams {
     fn default() -> Self {
         Self {
             input_trim: FloatParam::new(
-
                 "Input Trim",
                 0.0,
-                FloatRange::Linear { min: -24.0, max: 24.0 },
+                FloatRange::Linear {
+                    min: -24.0,
+                    max: 24.0,
+                },
             )
             .with_unit(" dB")
             .with_smoother(SmoothingStyle::Linear(50.0)),
@@ -55,31 +65,32 @@ impl Default for DeepFilterParams {
             atten_lim: FloatParam::new(
                 "Attenuation Limit",
                 100.0,
-                FloatRange::Linear { min: 0.0, max: 100.0 },
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 100.0,
+                },
             )
             .with_unit(" dB")
             .with_smoother(SmoothingStyle::Linear(50.0)),
 
-            mix: FloatParam::new(
-                "Mix",
-                1.0,
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_unit(" %")
-            .with_value_to_string(formatters::v2s_f32_percentage(0))
-            .with_string_to_value(formatters::s2v_f32_percentage()),
+            mix: FloatParam::new("Mix", 1.0, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_unit(" %")
+                .with_value_to_string(formatters::v2s_f32_percentage(0))
+                .with_string_to_value(formatters::s2v_f32_percentage()),
 
             output_gain: FloatParam::new(
                 "Output Gain",
                 0.0,
-                FloatRange::Linear { min: -24.0, max: 24.0 },
+                FloatRange::Linear {
+                    min: -24.0,
+                    max: 24.0,
+                },
             )
             .with_unit(" dB")
             .with_smoother(SmoothingStyle::Linear(50.0)),
 
             editor_state: EguiState::from_size(400, 300),
         }
-
     }
 }
 
@@ -87,11 +98,10 @@ impl Default for DeepFilterPlugin {
     fn default() -> Self {
         Self {
             params: Arc::new(DeepFilterParams::default()),
-            df_model: DfWrapper(Mutex::new(None)),
-            input_buffer: Mutex::new(Vec::new()),
-            output_buffer: Mutex::new(Vec::new()),
-            hop_size: 480,
-            is_initialized: false,
+            models: None,
+            stream: None,
+            skip_next_model_reset: false,
+            model_failures: 0,
         }
     }
 }
@@ -133,7 +143,7 @@ impl Plugin for DeepFilterPlugin {
             |_, _| {},
             move |egui_ctx, setter, _state| {
                 let params = &params;
-                
+
                 egui::CentralPanel::default().show(egui_ctx, |ui| {
                     ui.label("DeepFilterNet3 Implementation");
                     ui.separator();
@@ -141,7 +151,7 @@ impl Plugin for DeepFilterPlugin {
                     ui.label("Input Stage");
                     ui.label("Input Trim");
                     ui.add(widgets::ParamSlider::for_param(&params.input_trim, setter));
-                    
+
                     ui.separator();
                     ui.label("Processing");
                     ui.label("Attenuation Limit");
@@ -156,48 +166,73 @@ impl Plugin for DeepFilterPlugin {
                 });
             },
         )
-
     }
-
 
     fn initialize(
         &mut self,
         audio_io_layout: &AudioIOLayout,
         buffer_config: &BufferConfig,
-        _context: &mut impl InitContext<Self>,
+        context: &mut impl InitContext<Self>,
     ) -> bool {
-        // DeepFilterNet は 48kHz のみサポート
-        if (buffer_config.sample_rate - 48000.0).abs() > 1.0 {
-            nih_log!("DeepFilterNet requires 48kHz. Current: {}Hz", buffer_config.sample_rate);
+        self.clear_model();
+
+        if (buffer_config.sample_rate - 48_000.0).abs() > 1.0 {
+            nih_log!(
+                "DeepFilterNet requires 48kHz. Current: {}Hz",
+                buffer_config.sample_rate
+            );
             return false;
         }
 
-        let num_channels = audio_io_layout
+        let channels = audio_io_layout
             .main_input_channels
-            .map(|c| c.get() as usize)
+            .map(|count| count.get() as usize)
             .unwrap_or(1);
 
-        match self.init_model(num_channels) {
-            Ok(hop) => {
-                self.hop_size = hop;
-                self.is_initialized = true;
-                nih_log!("DeepFilterNet initialized. hop_size={}", hop);
+        match self.initialize_model(channels) {
+            Ok(latency_samples) => {
+                context.set_latency_samples(latency_samples);
+                nih_log!(
+                    "DeepFilterNet initialized. channels={}, latency={} samples",
+                    channels,
+                    latency_samples
+                );
                 true
             }
-            Err(e) => {
-                nih_log!("Failed to init DeepFilterNet: {:?}", e);
+            Err(error) => {
+                self.clear_model();
+                nih_log!("Failed to init DeepFilterNet: {:?}", error);
                 false
             }
         }
     }
 
     fn reset(&mut self) {
-        if let Ok(mut buf) = self.input_buffer.lock() {
-            buf.clear();
+        if self.skip_next_model_reset {
+            // NIH-plug always calls reset immediately after initialize(). That model is already
+            // pristine, so avoid cloning the large inference state on this first reset.
+            self.skip_next_model_reset = false;
+        } else if let Some(models) = self.models.as_mut() {
+            models.current.clone_from(&models.pristine);
         }
-        if let Ok(mut buf) = self.output_buffer.lock() {
-            buf.clear();
+
+        if let Some(stream) = self.stream.as_mut() {
+            stream.reset();
         }
+        self.params
+            .input_trim
+            .smoothed
+            .reset(self.params.input_trim.value());
+        self.params
+            .atten_lim
+            .smoothed
+            .reset(self.params.atten_lim.value());
+        self.params.mix.smoothed.reset(self.params.mix.value());
+        self.params
+            .output_gain
+            .smoothed
+            .reset(self.params.output_gain.value());
+        self.model_failures = 0;
     }
 
     fn process(
@@ -206,101 +241,45 @@ impl Plugin for DeepFilterPlugin {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        if !self.is_initialized {
+        let (Some(models), Some(stream)) = (self.models.as_mut(), self.stream.as_mut()) else {
             return ProcessStatus::Normal;
-        }
+        };
 
-        let mix = self.params.mix.smoothed.next();
-        let atten = self.params.atten_lim.smoothed.next();
-        let input_gain_db = self.params.input_trim.smoothed.next();
-        let output_gain_db = self.params.output_gain.smoothed.next();
-        
-        let input_gain = 10.0f32.powf(input_gain_db / 20.0);
-        let output_gain = 10.0f32.powf(output_gain_db / 20.0);
+        debug_assert_eq!(buffer.channels(), stream.channels());
+        let channels = stream.channels();
+        let hop_size = stream.hop_size();
+        let params = &self.params;
 
-        let num_samples = buffer.samples();
-        let num_channels = buffer.channels();
-        let hop = self.hop_size;
+        for channel_samples in buffer.iter_samples() {
+            let mix = params.mix.smoothed.next();
+            let input_gain = db_to_gain(params.input_trim.smoothed.next());
+            let output_gain = db_to_gain(params.output_gain.smoothed.next());
 
-        // 入力収集（インターリーブで保存）
-        {
-            let mut input_buf = self.input_buffer.lock().unwrap();
-            for i in 0..num_samples {
-                for channel in buffer.iter_samples().nth(i).unwrap() {
-                     input_buf.push(*channel * input_gain);
-                }
-            }
-        }
-
-
-        // DeepFilterNet でフレーム処理
-        {
-            let mut input_buf = self.input_buffer.lock().unwrap();
-            let mut output_buf = self.output_buffer.lock().unwrap();
-            let mut model_guard = self.df_model.0.lock().unwrap();
-
-            if let Some(ref mut df_model) = *model_guard {
-                df_model.set_atten_lim(atten);
-
-                // input_buf は [sample1_ch1, sample1_ch2, ..., sampleN_ch1, sampleN_ch2] のようにインターリーブされている前提
-                // 1フレームに必要なサンプル数 = hop * num_channels
-                let required_samples = hop * num_channels;
-
-                while input_buf.len() >= required_samples {
-                    // (channels, hop) の形状を作成
-                    let mut in_frame = Array2::zeros((num_channels, hop));
-                    let mut out_frame = Array2::zeros((num_channels, hop));
-
-                    // input_buf (Interleaved) -> in_frame (Planar: ch, time)
-                    for t in 0..hop {
-                        for ch in 0..num_channels {
-                            in_frame[[ch, t]] = input_buf[t * num_channels + ch];
-                        }
-                    }
-
-                    match df_model.process(in_frame.view(), out_frame.view_mut()) {
-                        Ok(_) => {
-                            // out_frame (Planar) -> output_buf (Interleaved)
-                            for t in 0..hop {
-                                for ch in 0..num_channels {
-                                    output_buf.push(out_frame[[ch, t]]);
-                                }
-                            }
-                        }
-                        Err(_) => {
-                            // エラー時は入力をバイパス
-                            output_buf.extend_from_slice(&input_buf[..required_samples]);
-                        }
-                    }
-
-                    input_buf.drain(..required_samples);
-                }
-            }
-        }
-
-
-        // 出力書き込み
-        {
-            let mut output_buf = self.output_buffer.lock().unwrap();
-            // output_buf もインターリーブされている
-            let required_out_samples = num_samples * num_channels;
-
-            if output_buf.len() >= required_out_samples {
-                for (sample_idx, channel_samples) in buffer.iter_samples().enumerate() {
-                    // sample_idx は時間のインデックス
-                    // output_buf は [t0_c0, t0_c1, t1_c0, t1_c1, ...]
-                    
-                    let mut ch_idx = 0;
-                    for sample in channel_samples {
-                        let processed = output_buf[sample_idx * num_channels + ch_idx];
-                        let dry = *sample * input_gain; 
-                        *sample = (dry * (1.0 - mix) + processed * mix) * output_gain;
-                        ch_idx += 1;
-                    }
-                }
-                output_buf.drain(..required_out_samples);
+            for (channel, sample) in channel_samples.into_iter().enumerate() {
+                let scaled_input = *sample * input_gain;
+                let (dry, wet) = stream.capture_channel(channel, scaled_input);
+                *sample = mix_sample(dry, wet, mix) * output_gain;
             }
 
+            if stream.advance_sample() {
+                let attenuation = params.atten_lim.smoothed.next_step(hop_size as u32);
+                models.current.set_atten_lim(attenuation);
+
+                let model_ok = {
+                    let (input_frame, output_frame) = stream.frame_buffers();
+                    let input = ArrayView2::from_shape((channels, hop_size), input_frame);
+                    let output = ArrayViewMut2::from_shape((channels, hop_size), output_frame);
+                    match (input, output) {
+                        (Ok(input), Ok(output)) => models.current.process(input, output).is_ok(),
+                        _ => false,
+                    }
+                };
+
+                if !model_ok {
+                    self.model_failures = self.model_failures.saturating_add(1);
+                }
+                stream.publish_model_output(model_ok);
+            }
         }
 
         ProcessStatus::Normal
@@ -308,21 +287,48 @@ impl Plugin for DeepFilterPlugin {
 }
 
 impl DeepFilterPlugin {
-    fn init_model(&mut self, channels: usize) -> Result<usize, Box<dyn std::error::Error>> {
-        let df_params = DfParams::default();
-        let rt_params = RuntimeParams::default_with_ch(channels);
-        let df = DfTract::new(df_params, &rt_params)?;
-        let hop = df.hop_size;
+    fn initialize_model(&mut self, channels: usize) -> Result<u32, Box<dyn std::error::Error>> {
+        let runtime_params = RuntimeParams::default_with_ch(channels);
+        let model = DfTract::new(DfParams::default(), &runtime_params)?;
+        let model_latency =
+            calculate_model_latency(model.fft_size, model.hop_size, model.lookahead)
+                .ok_or_else(|| std::io::Error::other("model latency overflow"))?;
+        let stream = StreamState::new(channels, model.hop_size, model_latency)
+            .map_err(std::io::Error::other)?;
+        let total_latency = u32::try_from(stream.latency_samples())
+            .map_err(|_| std::io::Error::other("plugin latency exceeds u32"))?;
 
-        *self.df_model.0.lock().unwrap() = Some(df);
-        // バッファサイズは (hop * channels) を考慮して少し多めに確保
-        let buf_capacity = hop * channels * 4;
-        *self.input_buffer.lock().unwrap() = Vec::with_capacity(buf_capacity);
-        *self.output_buffer.lock().unwrap() = Vec::with_capacity(buf_capacity);
+        self.models = Some(ExclusiveModels {
+            pristine: model.clone(),
+            current: model,
+        });
+        self.stream = Some(stream);
+        self.skip_next_model_reset = true;
+        self.model_failures = 0;
 
-
-        Ok(hop)
+        Ok(total_latency)
     }
+
+    fn clear_model(&mut self) {
+        self.models = None;
+        self.stream = None;
+        self.skip_next_model_reset = false;
+        self.model_failures = 0;
+    }
+}
+
+fn calculate_model_latency(fft_size: usize, hop_size: usize, lookahead: usize) -> Option<usize> {
+    fft_size
+        .checked_sub(hop_size)?
+        .checked_add(lookahead.checked_mul(hop_size)?)
+}
+
+fn db_to_gain(db: f32) -> f32 {
+    10.0f32.powf(db / 20.0)
+}
+
+fn mix_sample(dry: f32, wet: f32, mix: f32) -> f32 {
+    dry * (1.0 - mix) + wet * mix
 }
 
 impl ClapPlugin for DeepFilterPlugin {
@@ -335,10 +341,8 @@ impl ClapPlugin for DeepFilterPlugin {
 
 impl Vst3Plugin for DeepFilterPlugin {
     const VST3_CLASS_ID: [u8; 16] = *b"DeepFilterNR001\0";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[
-        Vst3SubCategory::Fx,
-        Vst3SubCategory::Restoration,
-    ];
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Fx, Vst3SubCategory::Restoration];
 }
 
 nih_export_clap!(DeepFilterPlugin);
@@ -347,114 +351,31 @@ nih_export_vst3!(DeepFilterPlugin);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nih_plug::prelude::*;
 
     #[test]
-    fn test_input_trim_gain_calculation() {
-        // Test +6dB
-        let mut params = DeepFilterParams::default();
-        params.input_trim = FloatParam::new(
-            "Input Trim",
-            6.0,
-            FloatRange::Linear { min: -24.0, max: 24.0 },
-        );
-        let gain = 10.0f32.powf(params.input_trim.value() / 20.0);
-        assert!((gain - 1.995).abs() < 0.01, "Expected approx 2.0 for +6dB, got {}", gain);
-
-        // Test -6dB
-        params.input_trim = FloatParam::new(
-            "Input Trim",
-            -6.0,
-            FloatRange::Linear { min: -24.0, max: 24.0 },
-        );
-        let gain = 10.0f32.powf(params.input_trim.value() / 20.0);
-        assert!((gain - 0.501).abs() < 0.01, "Expected approx 0.5 for -6dB, got {}", gain);
+    fn gain_calculation_matches_decibels() {
+        assert!((db_to_gain(6.0) - 1.995).abs() < 0.01);
+        assert!((db_to_gain(-6.0) - 0.501).abs() < 0.01);
+        assert!((db_to_gain(20.0) - 10.0).abs() < 0.01);
     }
 
     #[test]
-    fn test_output_gain_calculation() {
-        let mut params = DeepFilterParams::default();
-        // Test +20dB
-        params.output_gain = FloatParam::new(
-            "Output Gain",
-            20.0,
-            FloatRange::Linear { min: -24.0, max: 24.0 },
-        );
-        let gain = 10.0f32.powf(params.output_gain.value() / 20.0);
-        assert!((gain - 10.0).abs() < 0.01, "Expected 10.0 for +20dB, got {}", gain);
+    fn dry_wet_mix_endpoints_and_midpoint_are_correct() {
+        assert_eq!(mix_sample(1.0, -1.0, 0.0), 1.0);
+        assert_eq!(mix_sample(1.0, -1.0, 0.5), 0.0);
+        assert_eq!(mix_sample(1.0, -1.0, 1.0), -1.0);
     }
 
     #[test]
-    fn test_mix_calculation() {
-        let mut params = DeepFilterParams::default();
-        
-        // Test 50% Mix
-        params.mix = FloatParam::new(
-            "Mix",
-            0.5,
-            FloatRange::Linear { min: 0.0, max: 1.0 },
-        );
-        let mix = params.mix.value();
-        assert!((mix - 0.5).abs() < 0.001);
-
-        // Logic check: dry * (1.0 - mix) + wet * mix
-        let dry = 1.0;
-        let wet = 0.0;
-        let out = dry * (1.0 - mix) + wet * mix;
-        assert!((out - 0.5).abs() < 0.001);
+    fn model_latency_uses_stft_and_lookahead() {
+        assert_eq!(calculate_model_latency(960, 480, 2), Some(1440));
+        assert_eq!(calculate_model_latency(480, 960, 2), None);
+        assert_eq!(calculate_model_latency(usize::MAX, 1, 2), None);
     }
 
     #[test]
-    fn test_stereo_separation() {
-        // This test verifies the interleaving/de-interleaving logic used in process()
-        // to ensure it supports multi-channel processing without mono mixdown.
-        // Note: We are testing the logic logic because constructing a full nih_plug::Buffer
-        // without a host is complex.
-        
-        let num_channels = 2;
-        let hop = 480;
-        
-        // Simulate Input: Interleaved [L, R, L, R ...]
-        let mut input_interleaved = Vec::new();
-        for _ in 0..hop {
-            input_interleaved.push(1.0); // L = 1.0
-            input_interleaved.push(0.0); // R = 0.0
-        }
-        
-        // Logic from `process` (De-interleave)
-        let mut in_frame = Array2::zeros((num_channels, hop));
-        for t in 0..hop {
-            for ch in 0..num_channels {
-                in_frame[[ch, t]] = input_interleaved[t * num_channels + ch];
-            }
-        }
-        
-        // Verify De-interleave
-        for t in 0..hop {
-            assert_eq!(in_frame[[0, t]], 1.0, "Left channel should be 1.0");
-            assert_eq!(in_frame[[1, t]], 0.0, "Right channel should be 0.0");
-        }
-        
-        // Simulate Process (Identity for test)
-        let mut out_frame = in_frame.clone(); // Pass-through simulation
-        
-        // Logic from `process` (Re-interleave)
-        let mut output_interleaved = Vec::new();
-        for t in 0..hop {
-            for ch in 0..num_channels {
-                output_interleaved.push(out_frame[[ch, t]]);
-            }
-        }
-        
-        // Verify Re-interleave
-        for i in 0..hop*num_channels {
-            if i % 2 == 0 {
-                assert_eq!(output_interleaved[i], 1.0, "Output Left should be 1.0");
-            } else {
-                assert_eq!(output_interleaved[i], 0.0, "Output Right should be 0.0");
-            }
-        }
+    fn plugin_type_is_send_with_exclusive_model_boundary() {
+        fn assert_send<T: Send>() {}
+        assert_send::<DeepFilterPlugin>();
     }
 }
-
-

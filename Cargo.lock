@@ -603,6 +603,7 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 [[package]]
 name = "deep_filter"
 version = "0.5.7-pre"
+source = "git+https://github.com/Rikorose/DeepFilterNet.git?rev=d375b2d8309e0935d165700c91da9de862a99c31#d375b2d8309e0935d165700c91da9de862a99c31"
 dependencies = [
  "anyhow",
  "claxon",
@@ -628,7 +629,7 @@ dependencies = [
 
 [[package]]
 name = "deepfilter-vst"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "deep_filter",
  "log",

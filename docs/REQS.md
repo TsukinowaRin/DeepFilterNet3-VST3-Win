@@ -2,40 +2,55 @@
 
 ## 依頼内容
 
-- 依頼:
-  - Cargo を導入し、前回完了した Universal Agent Harness v2.6.1 移行差分を commit / push する
-- 背景:
-  - 前回は WSL / Windows の PATH に `cargo` がなく、製品 formatter だけ未実行だった
+- ユーザー明示要求（2026-08-03）: 「インストーラーをリリースして。コミットとプッシュも忘れずに」
+- mailbox task: `TASK-RELEASE-V1-1-0-20260803`（receiver `grok-release-v110` / batch `batch-20260803T103919Z-4dbf7b608550`）
+- 対象: 現在の `codex/vst-processing-reliability` 上の意図済み未 commit 差分を **v1.1.0** として commit / push / tag / GitHub Release 公開する
 
 ## 目標
 
-1. project pin に合わせた Rust 1.93.0、Cargo、rustfmt を WSL user 環境へ導入する
-2. `cargo fmt --all -- --check` とハーネス gate を通す
-3. migration 差分を 1 commit にまとめ、現在の topic branch を origin へ push する
+1. dirty 差分の intent を確認し、plugin version を `1.0.0` → `1.1.0` に上げ、Cargo.lock を同期する
+2. checkpoint gate を pass させたうえで 1 つの release commit を作る
+3. `origin/codex/vst-processing-reliability` へ通常 push する（force 禁止）
+4. `workflow_dispatch` で non-publishing CI（`version=v1.1.0-ci`）を成功させる（3ケース installer smoke 含む）
+5. branch CI 成功後だけ annotated tag `v1.1.0` を push し、tag workflow で GitHub Release を公開する
+6. release asset 2 件（setup EXE + sha256）を download 検証する
 
-## 非目標
+## 非目標 / DENY
 
-- Rust / Cargo の Windows 側への追加導入
-- プラグイン実装、dependencies、release workflow の変更
-- main への直接 push、PR merge、tag 作成、GitHub Release 公開
+- main / master への push / merge
+- 既存 tag `windows` / `v0.1.0` / `v0.1.1` の移動・削除・force push
+- 既存 release asset の上書き・削除
+- remote に `v1.1.0` tag / release が既にある場合の上書き
+- secrets / token / credential の読取・表示
+- local Windows plugin の再 install / uninstall、admin 昇格、DAW kill
+- test 弱体化、無関係 dependency 導入、破壊的 delete
+- branch CI 失敗前の tag push
+- local `dist/` 生成物の release upload（asset は tag workflow が同じ commit から build したものだけ）
+- native subagent / 別モデルへの再委任
 
 ## 制約
 
-- Cargo は公式 rustup installer を使い、admin 権限なしで WSL user 環境へ導入する
-- commit 対象は前回の v2.6.1 harness migration と今回の docs 更新だけに限定する
-- commit 前に製品固有ファイルが意図せず変更されていないことを確認する
-- push 先は `origin/codex/harness-v2.6.1-migration` とする
+- branch: `codex/vst-processing-reliability`
+- version 判断: VST reliability 改善 + installer 機能追加 → minor **v1.1.0**
+- release path: workflow の versioned tag path（`windows` 固定 tag は触らない）
+- commit 前 checkpoint が pass しなければ push しない
+- branch workflow 成功前に tag を push しない
+- 公開後の外部状態（Release URL / SHA / hash）は追加 commit せず最終応答と mailbox 結果に記載
 
 ## 受け入れ条件
 
-- [x] `rustc --version` と `cargo --version` が Rust 1.93.0 toolchain を示す
-- [x] `cargo fmt --all -- --check` を実行し、既存の製品・sibling dependency の formatting diff を記録する（今回の範囲では変更しない）
-- [x] `python3 scripts/sync_shared_context.py --check` が pass する
-- [x] `bash scripts/security_smoke.sh` と `bash scripts/smoke_template.sh` が pass する
-- [x] `git diff --check` と差分 review が pass する
-- [x] migration 差分が commit され、origin の topic branch と commit が一致する
+- [ ] plugin `Cargo.toml` / `Cargo.lock` の deepfilter-vst version が `1.1.0`
+- [ ] 意図済み差分のみを 1 commit にまとめ worktree clean
+- [ ] origin branch SHA が local commit と一致
+- [ ] workflow_dispatch `v1.1.0-ci` の全 job 成功（3ケース install/uninstall smoke）
+- [ ] annotated tag `v1.1.0` が成功 commit を指し、tag CI 成功
+- [ ] GitHub Release `v1.1.0` が published / non-draft / non-prerelease
+- [ ] asset 2 件の名前・size・sha256 が一致し EXE が MZ/PE
 
 ## 仮定
 
-- 「Cargo 入れて」は、現在作業中の WSL 環境への Rust toolchain 導入を指す
-- 「プッシュ」は現在の topic branch の origin push を指し、main への統合は含まない
+- repo: WSL `/mnt/c/Git_WorkSpace/DeepFilterNet3-VST3-Win` / Windows `C:\Git_WorkSpace\DeepFilterNet3-VST3-Win`
+- preflight: local/remote tag `v1.1.0` なし、GitHub Release `v1.1.0` なし、`gh` auth 利用可（token 非表示）
+- ユーザー承認済み: commit / push / tag / release 公開
+- WSL の pkg-config/gl 失敗は既知。Windows MSVC cargo gates は必須
+- local install/uninstall は行わない

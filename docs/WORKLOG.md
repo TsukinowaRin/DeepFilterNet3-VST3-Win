@@ -12,44 +12,57 @@
 ## 現在の状態
 
 - 現在の作業:
-  - Cargo 導入後の Universal Agent Harness v2.6.1 移行差分 commit / push（完了）
+  - v1.1.0 release（TASK-RELEASE-V1-1-0-20260803）— checkpoint pass、commit / push 直前
 - 直近の状態:
-  - migration commit `db748b7` を `origin/codex/harness-v2.6.1-migration` へ push 済み
+  - plugin version `1.1.0`、local gates 全 pass、tag/release 未作成
 - 次にやること:
-  - なし。必要なら GitHub PR を作成する
+  - 意図済み差分を 1 commit → branch push → workflow_dispatch `v1.1.0-ci` → 成功後 tag `v1.1.0`
 - ブロッカー:
-  - なし
+  - なし（ユーザー承認済み）
 - 次に最初に読む文書:
-  - `docs/REQS.md`, `docs/EXECPLAN_2026-08-01_harness-v2.6.1-migration.md`
+  - `docs/REQS.md`, `docs/EXECPLAN_2026-08-03_release-v1.1.0.md`
 - 次に最初に実行するコマンド:
-  - `git status --short --branch`
+  - `git status --short` のあと stage / commit
 
 ---
 
 ## エントリ
 
-### 2026-08-01 JST（Cargo 導入と migration commit / push — 完了）
+### 2026-08-03 JST（v1.1.0 release — preflight / checkpoint）
 
-- 目的: 前回未実行だった Rust formatter を試し、v2.6.1 harness migration を commit / push する
-- toolchain: 公式 rustup installer で WSL user 環境へ `rustc 1.93.0`、`cargo 1.93.0`、`rustfmt 1.8.0` を導入。admin 権限は不使用
-- dependency setup: README の標準構成に合わせ、欠けていた `../DeepFilterNet` を upstream `Rikorose/DeepFilterNet` の shallow clone（`d375b2d`）として配置。対象 repo の外なので commit には含めない
-- formatter: `cargo fmt --all -- --check` は実行可能になったが、sibling `DeepFilterNet/libDF/src/capi.rs` と既存 `plugin/src/lib.rs` の formatting diff で exit 1。今回の依頼外なのでファイルは変更していない
-- 検証: toolchain version、shared context、security smoke、Windows optional を省いた template smoke、staged whitespace、製品ファイル非変更を確認
-- commit: `db748b7470ef1322edd83309c89e4d3c6a0b5b0b`（101 files、v2.6.1 harness migration）。push 前の初回 commit は author identity 未設定で失敗したため、既存履歴と同じ identity を repo-local に設定して再実行
-- push: `origin/codex/harness-v2.6.1-migration` を新規作成し upstream tracking を設定
-- 未完了: なし。PR 作成・main merge は非目標
-- ブロッカー: なし。formatter failure は pre-existing source formatting と `--all` による local path dependency 対象化
-- 次の一手: 必要なら GitHub の compare URL から PR を作成する
+- 目的: VST reliability + Windows installer 差分を v1.1.0 として commit / push / tag / GitHub Release
+- 承認: 2026-08-03 ユーザー「インストーラーをリリースして。コミットとプッシュも忘れずに」/ mailbox `TASK-RELEASE-V1-1-0-20260803`
+- preflight:
+  - branch `codex/vst-processing-reliability` @ `4c9fd6e`、upstream 未設定
+  - local/remote tag `v1.1.0` なし、`gh release view v1.1.0` not found
+  - `gh` login 済み（token 非表示）
+  - dirty intent: VST stream/reliability、pinned DeepFilterNet、installer/package/workflow、README/docs。secret/dist/target は stage 外
+- 実施:
+  1. `docs/REQS.md` を release 要求へ更新
+  2. `docs/EXECPLAN_2026-08-03_release-v1.1.0.md` 新規
+  3. plugin version `1.0.0` → `1.1.0`、Cargo.lock 同期、README release 節の最小更新
+- 検証（commit 前 checkpoint）:
+  - PowerShell parser 3本 OK
+  - `test-installer-source.ps1` OK
+  - ISCC via `package-release.ps1 -Version v1.1.0` → setup 26,487,022 bytes、SHA-256 `48a8788f49feab7b3b61627a237aaea357b405fe12d18728a8c13f07ff51aac2`（local のみ。release upload しない）
+  - Windows MSVC: `cargo fmt --all -- --check` / `cargo check --locked` / `cargo test --locked`（9 passed）
+  - `security_smoke.sh` OK、`TEMPLATE_SMOKE_WINDOWS_TIMEOUT=20s smoke_template.sh` OK、`git diff --check` OK
+- 明示しなかったこと: main push、既存 tag 移動、local reinstall、secrets 読取、test 弱体化
+- Go / No-Go: checkpoint Go。branch CI / tag は push 後
+- mailbox: batch `batch-20260803T103919Z-4dbf7b608550` / task `TASK-RELEASE-V1-1-0-20260803` / receiver `grok-release-v110--20260803T103729Z--395ccd33`
+- 次の一手: commit → push → workflow_dispatch `v1.1.0-ci`
 
-### 2026-08-01 JST（Universal Agent Harness v2.6.1 移行 — 完了）
+### 2026-08-03 JST（format checkboxes 監督差し戻し — UsePreviousTasks=no）
 
-- 目的: 指定 GitHub Release の clean harness を製品固有ファイルを保持して導入する
-- source: v2.6.1 release asset、215119 bytes、101 files、SHA-256 `d82c17e…aab7`
-- 完了: tag `v2.6.1` と release date `20260731` を含む asset verifier、branch 作成、101/101 path 導入、PROJECT_BRIEF / REQS 初期化、`.gitignore` 統合
-- 保持: Rust source / manifests、製品 README 2本、`.github/`、`scripts/package-release.ps1`
-- 配布物調整: upstream asset の whitespace 3 source 箇所を正規化し、`.claude/skills/` mirror を同期
-- 検証: `sync_shared_context.py --check`、`security_smoke.sh`、full `smoke_template.sh`、Windows optional を省いた修正後 smoke、tracked / untracked whitespace check、変更禁止範囲の diff check が pass
-- 未確認: `cargo fmt --all -- --check` は WSL / Windows とも `cargo` が PATH に無く実行不能。製品コードは無変更
-- 未完了: なし。commit / push は非目標のため未実施
-- ブロッカー: なし
-- 次の一手: 必要なら `git status --short` から commit review を開始する
+- 目的: 「初期両方選択」を previous install の有無に依存せず保証する
+- 承認: commander-format-select 差し戻し instruction（batch `batch-20260803T091601Z-3b37d4c2935a`）
+- 実装: `UsePreviousTasks=no`、task 行から `checkedonce`/`unchecked` 削除、source contract 更新、docs 同期
+- 検証: parser / source contract / ISCC compile / harness gates OK（詳細は本 release 以前の記録）
+- Go / No-Go: local 修正 Go。CI は release タスクで実行
+
+### 2026-08-03 JST（installer format checkboxes — mailbox TASK-INSTALLER-FORMAT-CHECKBOXES）
+
+- 目的: installer GUI で VST3 / CLAP / 両方をチェックボックス選択（初期両方選択）
+- 実装: 独立 Tasks、Files 条件化、NextButtonClick ガード、3ケース CI smoke、docs 同期
+- 検証: parser / source / ISCC / Windows cargo 9 passed / harness OK
+- 注: 初回の「初期両方選択」は previous install 環境で保証されず、監督差し戻しで修正済み

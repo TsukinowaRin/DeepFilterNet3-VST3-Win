@@ -7,17 +7,16 @@
 
 ## クイックスタート
 
-1. Releases から最新の `windows-x86_64.zip` を取得します。
-2. 展開します。
-3. `deepfilter-vst.vst3` を `C:\Program Files\Common Files\VST3\` にコピーします。
-4. DAW のプロジェクトを `48 kHz` に設定します。
-5. mono または stereo トラックへ `DeepFilter Noise Reduction` を挿します。
+1. Releases から最新の `windows-x86_64-setup.exe` を取得します。
+2. DAWを閉じ、installerを実行してWindowsの管理者確認を承認します。
+3. タスク画面のチェックボックスで VST3 / CLAP / 両方を選びます（毎回両方選択で開始。前回インストールのタスク選択は復元しません）。
+4. DAWのprojectを`48 kHz`に設定し、pluginを再scanします。
+5. monoまたはstereo trackへ`DeepFilter Noise Reduction`を挿します。
 
 ## 対応範囲
 
 - 主対象: Windows x86_64
-- 主形式: VST3
-- 追加成果物: 同じソースから CLAP も生成
+- 形式: VST3 と CLAP。installer GUI でどちらか一方、または両方を選択可能（毎回両方選択で開始。前回のタスク選択は復元しない）
 - 必須サンプルレート: 48 kHz
 - 対応チャンネル: mono / stereo
 
@@ -36,15 +35,28 @@
 
 想定している配布ファイル名:
 
-- `deepfilter-vst-windows-x86_64.zip`
-- `deepfilter-vst-windows-x86_64.zip.sha256`
+- `deepfilter-vst-windows-x86_64-setup.exe`
+- `deepfilter-vst-windows-x86_64-setup.exe.sha256`
 
 ## インストール
 
-1. 最新の Release ZIP をダウンロードして展開します。
-2. `deepfilter-vst.vst3` を `C:\Program Files\Common Files\VST3\` にコピーします。
-3. CLAP 版も使う場合は `deepfilter-vst.clap` を `C:\Program Files\Common Files\CLAP\` にコピーします。
-4. DAW 側でプラグインを再スキャンします。
+1. 最新Releaseの`*-setup.exe`をダウンロードして実行します。
+2. 管理者確認を承認します。タスク画面のチェックボックスで VST3 / CLAP / 両方を選べます。毎回 wizard 表示時は両方選択（`UsePreviousTasks=no` により前回インストールのタスク選択は復元しない）。少なくとも一方の選択が必須です。
+3. DAW側でpluginを再scanします。
+
+installerは選択したpluginをWindowsのsystem-wide標準位置へ配置します。
+
+- VST3: `C:\Program Files\Common Files\VST3\deepfilter-vst.vst3`
+- CLAP: `C:\Program Files\Common Files\CLAP\deepfilter-vst.clap`
+
+## アンインストール
+
+すべてのDAWを閉じ、次のどちらかを開きます。
+
+- Windowsの設定 → アプリ → インストールされているアプリ → `DeepFilterNet3 VST3` → アンインストール
+- Start Menu → `DeepFilterNet3 VST3` → `Uninstall DeepFilterNet3 VST3`
+
+uninstallerはこのpackageがinstallしたVST3および/またはCLAPだけを削除します。共有VST3 / CLAP directoryにある他のpluginは削除しません。再install時に未選択のformatを自動削除することはありません。
 
 ## パラメータ
 
@@ -63,73 +75,64 @@
 
 ## ソースからビルド
 
-現状の構成では、このリポジトリの隣に upstream の `DeepFilterNet` ソースが必要です。
-
-```text
-workspace/
-  DeepFilterNet3-VST3-Win/
-  DeepFilterNet/
-```
+`plugin/Cargo.toml`でreview済みDeepFilterNet revisionを固定しており、Cargoが取得します。隣接checkoutは不要です。
 
 セットアップ例:
 
 ```bash
 git clone https://github.com/TsukinowaRin/DeepFilterNet3-VST3-Win.git
-git clone https://github.com/Rikorose/DeepFilterNet.git
 cd DeepFilterNet3-VST3-Win
-cargo test
-cargo xtask bundle deepfilter-vst --release
+cargo test --locked
+cargo run --locked --package xtask --release -- bundle deepfilter-vst --release
 pwsh ./scripts/package-release.ps1 -ArtifactBase deepfilter-vst-windows-x86_64
 ```
 
+packagingにはInno Setup 6が必要です。`ISCC.exe`が`PATH`にない場合は`-InnoCompiler`でcompiler pathを渡します。
+
 推奨 Rust/Cargo toolchain:
 
-- `rustup default 1.93.0`
+- `rustup toolchain install 1.93.0`
 
 生成物:
 
 - `target/bundled/deepfilter-vst.vst3`
 - `target/bundled/deepfilter-vst.clap`
-- `dist/deepfilter-vst-windows-x86_64.zip`
+- `dist/deepfilter-vst-windows-x86_64-setup.exe`
+- `dist/deepfilter-vst-windows-x86_64-setup.exe.sha256`
 
 ## Release 作成
 
-- Windows 1.0 チャンネル: `windows` タグを push
-- Release 名: `v1.0.0-deepfilter-vst3-windows`
-- 手動パッケージ: `pwsh ./scripts/package-release.ps1 -ArtifactBase deepfilter-vst-windows-x86_64`
+- version 付き installer release: annotated tag（例: `v1.1.0`）を push（asset 基名 `DeepFilterNet3-VST3-Win-v1.1.0-windows-x86_64-setup.exe`）
+- 旧 Windows 1.0 チャンネル tag: `windows` → Release 名 `v1.0.0-deepfilter-vst3-windows`（固定 channel。minor release では動かさない）
+- 手動パッケージ: `pwsh ./scripts/package-release.ps1 -Version v1.1.0 -ArtifactBase DeepFilterNet3-VST3-Win-v1.1.0-windows-x86_64`
 - 自動化の定義: `.github/workflows/release.yml`
 
 ## リポジトリ構成
 
 - `plugin/`: プラグイン本体
 - `xtask/`: `nih_plug_xtask` エントリポイント
-- `scripts/package-release.ps1`: Release ZIP 生成
+- `installer/deepfilter-vst.iss`: Inno Setup installer定義
+- `scripts/package-release.ps1`: installerとchecksum生成
+- `scripts/test-installer.ps1`: CI専用install / uninstall smoke test
 - `.github/workflows/release.yml`: GitHub Releases 自動化
 
 ## 制約
 
 - 現在の DeepFilterNet ランタイム初期化は `48 kHz` 前提です。
 - 公式サポート対象は Windows VST3 配布です。
-- ソースビルドには上記の sibling `DeepFilterNet` 配置が必要です。
+- installerは未code signingのため、WindowsがSmartScreenの警告を表示する場合があります。
 
 ---
 
-### 【警告】DaVinci Resolve 20における既知の問題点
+### DaVinci Resolve 20のオフライン出力について
 
-現在のDeepFilterNet3-VST3プラグイン（nih-plug / Rust libDFベース）をDaVinci Resolve 20で使用した場合、**デリバーページでのオフラインレンダリング実行時に音声出力が完全に「無音」になる致命的な問題**が確認されています。
+既存のWindows配布版では、デリバーページからのオフライン出力が無音になる現象が確認されています。現在のsourceでは、その実装で見つかった3つの原因を修正しました。
 
-これは、本プラグインの処理パイプラインとDaVinci Resolveのオフラインレンダリングの挙動との間にある、根本的な非互換性に起因するものです。具体的な問題点（原因）は以下の通りです。
+- hostのblock sizeに関係なく、全sampleをDeepFilterNetの固定480-sample frameへ渡す
+- hostが新しい処理segmentを始める際に、pluginとmodelの状態をresetする
+- 48 kHzで合計1,920 sample（model latency + adapter 1 frame）のlatencyをhostへ通知し、dry経路も同じ長さ遅延する
 
-*   **サンプルレートの非互換と制限**
-    Rustの`libdf`ライブラリは厳密に48kHzのサンプルレートを要求しますが、DaVinci Resolveはレンダリング中にサンプルレートを変更する可能性があり、処理が正常に行われません。
-*   **オフライン処理への移行時の内部ステート初期化不良**
-    DaVinci Resolveがリアルタイム再生からオフライン（非リアルタイム）レンダリングへ移行する際、プラグインを再初期化（`prepareToPlay`の再呼び出し）し、最高速度でオーディオブロックの処理を行います。このフローにおいて、STFT（短時間フーリエ変換）の内部状態（オーバーラップバッファ等）やRNNの隠れ状態、正規化の統計情報が適切にリセット・再初期化されないため、無音（ゼロ）が出力され続けます。
-*   **動的なバッファサイズ変更への適応不全**
-    オフラインレンダリング時、DaVinci Resolveはリアルタイム再生時とは異なるバッファサイズを使用することがあります。厳格なバッファ処理を要求する現行のライブラリは、このサイズ変動に適切に適応できません。
-*   **レイテンシー補正の不具合**
-    内部処理（20msのウィンドウ、10msのホップサイズ、2フレームの先読み）によって発生する約40msのアルゴリズムレイテンシーに対し、DaVinci Resolveのオフラインレンダラー環境下ではレイテンシー補正が正しく機能しません。
-
-現在、DaVinci Resolve 20でのエクスポート（デリバー）において本プラグインを使用することはできませんのでご注意ください。
+可変block、reset、dry/wet整列、model失敗時のfallbackは自動testで確認済みです。DaVinci Resolve 20のWindows実機によるオフライン出力はまだ再検証していないため、出力互換性は未確認です。Resolveのprojectと出力音声は48 kHzにしてください。それ以外のsample rateではpluginの初期化が失敗します。
 
 ---
 
